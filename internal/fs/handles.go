@@ -118,6 +118,9 @@ func (s *Backend) getFile(handle int32) *fileHandle {
 	}
 
 	if handle == udpfs.BlockDeviceHandle {
+		if s.bdHandle == nil {
+			return nil
+		}
 		return s.bdHandle.fileHandle
 	}
 	s.Lock()
