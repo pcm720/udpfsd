@@ -18,7 +18,8 @@ type Connection struct {
 	sess *udprdma.Session
 	*metricCollector
 
-	usedHandles map[int32]cachedHandle
+	usedHandles       map[int32]cachedHandle
+	activeWriteHandle int32
 
 	sync.Mutex
 	dataBuffer [128 * 1024]byte // 128 KB read buffer
@@ -35,10 +36,11 @@ type cachedHandle struct {
 // NewConnection returns a Connection that sends via the given session and dispatches requests to fs.
 func NewConnection(sess *udprdma.Session, fs FS, verbose bool, collectMetrics bool) *Connection {
 	c := &Connection{
-		sess:        sess,
-		fs:          fs,
-		verbose:     verbose,
-		usedHandles: make(map[int32]cachedHandle, 32),
+		sess:              sess,
+		fs:                fs,
+		verbose:           verbose,
+		usedHandles:       make(map[int32]cachedHandle, 32),
+		activeWriteHandle: -1,
 	}
 	sess.SetResetCallback(c.ResetPeer)
 	if collectMetrics {
@@ -80,6 +82,7 @@ func (c *Connection) SendReadResult(addr *net.UDPAddr, result int32, data []byte
 
 // SendWriteDone sends a WRITE_DONE.
 func (c *Connection) SendWriteDone(addr *net.UDPAddr, result int32) {
+	c.clearWriteHandle()
 	c.sess.SendData(PackWriteDone(result))
 }
 
@@ -139,6 +142,9 @@ func (c *Connection) removeHandle(handle int32) {
 	c.Lock()
 	defer c.Unlock()
 	delete(c.usedHandles, handle)
+	if c.activeWriteHandle == handle {
+		c.activeWriteHandle = -1
+	}
 }
 
 // Resets all peer handles
@@ -162,4 +168,22 @@ func (c *Connection) Close() {
 		c.fs.Close(fsHandle)
 		delete(c.usedHandles, fsHandle)
 	}
+}
+
+func (c *Connection) getWriteHandle() int32 {
+	c.Lock()
+	defer c.Unlock()
+	return c.activeWriteHandle
+}
+
+func (c *Connection) setWriteHandle(handle int32) {
+	c.Lock()
+	defer c.Unlock()
+	c.activeWriteHandle = handle
+}
+
+func (c *Connection) clearWriteHandle() {
+	c.Lock()
+	defer c.Unlock()
+	c.activeWriteHandle = -1
 }

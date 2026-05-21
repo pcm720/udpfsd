@@ -200,6 +200,18 @@ func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) 
 			size := uint32(payload[8]) | uint32(payload[9])<<8 | uint32(payload[10])<<16 | uint32(payload[11])<<24
 			log.Printf("[%s]: WRITE handle=%d size=%d: %d", addr, handle, size, status)
 		}
+	case MsgWriteData:
+		if len(payload) >= 8 {
+			chunkNr := int32(uint32(payload[2]) | uint32(payload[3])<<8)
+			chunkSize := int32(uint32(payload[4]) | uint32(payload[5])<<8)
+			totalChunks := int32(uint32(payload[6]) | uint32(payload[7])<<8)
+			log.Printf("[%s]: WRITE_DATA chunk=%d size=%d total=%d: %d", addr, chunkNr, chunkSize, totalChunks, status)
+		}
+	case MsgWriteDone:
+		if len(payload) >= 8 {
+			result := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
+			log.Printf("[%s]: WRITE_DONE result=%d: %d", addr, result, status)
+		}
 	case MsgLseekReq:
 		if len(payload) >= 16 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)

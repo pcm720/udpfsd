@@ -162,6 +162,8 @@ func (c *Connection) handleWriteReq(addr *net.UDPAddr, payload []byte) int {
 		c.SendWriteDone(addr, errCode)
 		return int(errCode)
 	}
+	c.setWriteHandle(handle)
+
 	if len(payload) <= 12 {
 		c.SendACK(addr, true)
 		return 0
@@ -205,7 +207,12 @@ func (c *Connection) handleWriteData(addr *net.UDPAddr, payload []byte) int {
 		c.SendACK(addr, true)
 		return 0
 	}
-	handle := int32(binary.LittleEndian.Uint32(payload[4:8]))
+	handle := c.getWriteHandle()
+	if handle == -1 {
+		c.SendACK(addr, true)
+		return EBADF
+	}
+
 	chunkNr := binary.LittleEndian.Uint16(payload[2:4])
 	chunkSize := binary.LittleEndian.Uint16(payload[4:6])
 	totalChunks := binary.LittleEndian.Uint16(payload[6:8])
@@ -403,6 +410,8 @@ func (c *Connection) handleBwriteReq(addr *net.UDPAddr, payload []byte) int {
 		c.SendWriteDone(addr, errCode)
 		return int(errCode)
 	}
+	c.setWriteHandle(handle)
+
 	if len(payload) <= 16 {
 		c.SendACK(addr, true)
 		return 0
