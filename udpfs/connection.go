@@ -168,6 +168,7 @@ func (c *Connection) Close() {
 		c.fs.Close(fsHandle)
 		delete(c.usedHandles, fsHandle)
 	}
+	c.sess.Close()
 }
 
 func (c *Connection) getWriteHandle() int32 {
