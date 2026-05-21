@@ -5,6 +5,7 @@ package udprdma
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 )
 
 // Protocol constants
@@ -21,8 +22,10 @@ const (
 
 // Flow control
 const (
-	SendWindow     = 8    // Max unacked packets in flight
-	MaxDataPayload = 1408 // Max UDPRDMA data payload per packet
+	SendWindow        = 8                      // Max unacked packets in flight
+	MaxDataPayload    = 1408                   // Max UDPRDMA data payload per packet
+	RetransmitTimeout = 500 * time.Millisecond // Max wait before retransmitting if no ACK/NACK received
+	MaxRetransmits    = 4
 )
 
 // PacketType is the UDPRDMA packet type (4 bits)

@@ -1,6 +1,7 @@
 package udprdma
 
 import (
+	"log"
 	"math"
 )
 
@@ -23,6 +24,28 @@ func (s *Session) ContinuePendingSend() {
 			s.pendingSend.data = nil
 		}
 		s.SendDataPacket(chunk, fin, 0)
+	}
+}
+
+func (s *Session) finAckTracker() {
+	for {
+		select {
+		case <-s.finAckTicker.C:
+			s.Lock()
+			s.retransmitAttempts++
+			s.RetransmitFrom((s.txSeqNrAcked + 1) & 0xFFF)
+			if s.retransmitAttempts == MaxRetransmits {
+				// Max number of retransmits exceeded, give up
+				log.Printf("[%s]: final FIN ACK timeout for packet %d, retransmitting from %d and giving up", s.peerAddr, (s.txSeqNr-1)&0xFFF, (s.txSeqNrAcked+1)&0xFFF)
+				s.finAckTicker.Stop()
+			} else {
+				log.Printf("[%s]: FIN ACK timeout for packet %d, retransmitting from %d", s.peerAddr, (s.txSeqNr-1)&0xFFF, (s.txSeqNrAcked+1)&0xFFF)
+			}
+			s.Unlock()
+		case <-s.closeChan:
+			s.finAckTicker.Stop()
+			return
+		}
 	}
 }
 
@@ -59,13 +82,24 @@ func (s *Session) SendDataPacket(payload []byte, fin bool, hdrSize int) {
 
 	s.writeTo(s.peerAddr, pkt)
 	s.txSeqNr = (s.txSeqNr + 1) & 0xFFF
-
 	s.packetsTx++
+
+	if fin {
+		// FIN packet sent, reset the tracker timer to start FIN ACK window
+		s.retransmitAttempts = 0
+		s.finAckTicker.Reset(RetransmitTimeout)
+	}
 }
 
 // OnAck updates send state from a received ACK and prunes txBuffer.
 func (s *Session) OnAck(seqNrAck uint16) {
 	s.txSeqNrAcked = seqNrAck
+
+	if seqNrAck == ((s.txSeqNr - 1) & 0xFFF) {
+		// This ACK confirms a FIN packet, stop ACK tracking
+		s.finAckTicker.Stop()
+		s.retransmitAttempts = 0
+	}
 
 	// Move read index forward, skipping all acked packets
 	for s.txReadIndex != s.txWriteIndex {
@@ -98,6 +132,9 @@ func (s *Session) RetransmitFrom(fromSeq uint16) {
 			s.writeTo(s.peerAddr, p.data)
 		}
 	}
+
+	// Reset tracking goroutine timer
+	s.finAckTicker.Reset(RetransmitTimeout)
 }
 
 // sendACK sends an ACK or NACK packet (no payload).
@@ -135,6 +172,8 @@ func (s *Session) ResetSession() {
 	s.txWriteIndex = 0
 	s.pendingSend.data = nil
 	s.rxSeqExpected = 0
+	s.finAckTicker.Stop()
+	s.retransmitAttempts = 0
 	s.peerResets++
 	if s.resetCallback != nil {
 		s.resetCallback()

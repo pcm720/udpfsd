@@ -33,6 +33,10 @@ type Session struct {
 	rxSeqExpected uint16
 
 	packetBuf [1500]byte
+
+	finAckTicker       *time.Ticker
+	retransmitAttempts int
+	closeChan          chan struct{}
 }
 
 type txPacket struct {
@@ -54,14 +58,22 @@ func NewSession(peerAddr net.UDPAddr, writeTo func(addr *net.UDPAddr, data []byt
 		peerAddr:     &peerAddr,
 		creationTime: time.Now(),
 		pendingSend:  &pendingSend{},
+		finAckTicker: time.NewTicker(time.Minute),
+		closeChan:    make(chan struct{}),
 	}
+	s.finAckTicker.Stop()
 	for i := range s.txBuffer {
 		s.txBuffer[i] = txPacket{
 			data: make([]byte, 1500),
 		}
 	}
+	go s.finAckTracker()
 
 	return s
+}
+
+func (s *Session) Close() {
+	close(s.closeChan)
 }
 
 // Sets function that will be called on peer reset
@@ -143,23 +155,7 @@ func (s *Session) SendData(payload []byte) {
 	s.Lock()
 	defer s.Unlock()
 
-	padded := (len(payload) + 3) & ^3
-
-	pkt := s.packetBuf[:padded+headerSize+dataHeaderSize]
-
-	Header{PacketType: PacketData, SeqNr: s.txSeqNr}.Pack(pkt)
-	DataHeader{
-		SeqNrAck: (s.rxSeqExpected - 1) & 0xFFF, Flags: uint8(DataFlagACK | DataFlagFIN),
-		HdrWordCount: 0, DataByteCount: uint16(padded),
-	}.Pack(pkt[headerSize:])
-
-	copy(pkt[headerSize+dataHeaderSize:], payload)
-	clear(pkt[headerSize+dataHeaderSize+len(payload):])
-
-	s.writeTo(s.peerAddr, pkt)
-	s.txSeqNr = (s.txSeqNr + 1) & 0xFFF
-	s.packetsTx++
-
+	s.SendDataPacket(payload, true, 0)
 }
 
 // SendRawDataWithHeader sends header + data with header on first packet; may set pending and return.
