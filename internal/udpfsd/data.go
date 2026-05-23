@@ -13,7 +13,7 @@ import (
 func (s *Server) dataHandler() {
 	defer s.wg.Done()
 
-	s.dataConn.SetReadBuffer(2048)
+	s.dataConn.SetReadBuffer(1 << 20)
 	buf := make([]byte, 2048)
 	for {
 		n, addr, err := s.dataConn.ReadFromUDP(buf)
@@ -31,13 +31,7 @@ func (s *Server) dataHandler() {
 			// UDPFS data packet must be at least 6 bytes long
 			continue
 		}
-		if s.singleThreaded {
-			s.handleData(buf[:n], addr)
-		} else {
-			pkt := make([]byte, n)
-			copy(pkt, buf[:n])
-			go s.handleData(pkt, addr)
-		}
+		s.handleData(buf[:n], addr)
 	}
 }
 

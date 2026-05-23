@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -37,9 +36,8 @@ type Server struct {
 	metricsLoggingPeriod time.Duration
 
 	sync.Mutex
-	verbose        bool
-	logMetrics     bool
-	singleThreaded bool // If true, will handle all data packets in one goroutine
+	verbose    bool
+	logMetrics bool
 }
 
 type peer struct {
@@ -106,11 +104,6 @@ func New(opts ...ServerOptFunc) (*Server, error) {
 	}
 	if s.fs == nil {
 		return nil, fmt.Errorf("filesystem handler not set")
-	}
-
-	if runtime.NumCPU() < 2 {
-		log.Printf("udpfsd: less than 2 CPUs found, will handle all data packets in order")
-		s.singleThreaded = true
 	}
 
 	return s, nil
