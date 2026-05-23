@@ -80,8 +80,8 @@ func (s *Session) SendDataPacket(payload []byte, fin bool, hdrSize int) {
 		panic("udprdma: ring buffer is full")
 	}
 
-	s.writeTo(s.peerAddr, pkt)
 	s.txSeqNr = (s.txSeqNr + 1) & 0xFFF
+	s.writeTo(s.peerAddr, pkt)
 	s.packetsTx++
 
 	if fin {
@@ -104,13 +104,12 @@ func (s *Session) OnAck(seqNrAck uint16) {
 	// Move read index forward, skipping all acked packets
 	for s.txReadIndex != s.txWriteIndex {
 		p := s.txBuffer[s.txReadIndex]
-		diff := (p.seq - seqNrAck - 1) & 0xFFF
-		if diff >= 2048 {
-			// This packet and all subsequent ones are outside window, stop
-			break
-		}
 		// Packet can be discarded (slot will be reused)
 		s.txReadIndex = (s.txReadIndex + 1) % len(s.txBuffer)
+		if p.seq == seqNrAck {
+			// Last acked packet in the buffer, stop
+			break
+		}
 	}
 }
 
