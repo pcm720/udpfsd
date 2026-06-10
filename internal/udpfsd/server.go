@@ -17,7 +17,8 @@ import (
 
 // Server is the UDPFS daemon: sockets, UDPRDMA session, and dispatch to udpfs.FS.
 type Server struct {
-	startTime time.Time
+	startTime   time.Time
+	peerTimeout time.Duration
 
 	// FS is the filesystem implementation; the protocol layer (udpfs) parses packets and calls FS.
 	fs udpfs.FS
@@ -46,8 +47,8 @@ type peer struct {
 }
 
 const (
-	peerTimeout          = time.Hour
-	peerCleanupInterval  = 30 * time.Minute
+	defaultPeerTimeout   = time.Hour
+	peerCleanupInterval  = 30 * time.Second
 	metricsLoggingPeriod = time.Minute
 )
 
@@ -91,6 +92,15 @@ func WithMetrics(loggingPeriod time.Duration) func(s *Server) {
 	}
 }
 
+func WithPeerTimeout(peerTimeout time.Duration) func(s *Server) {
+	return func(s *Server) {
+		if peerTimeout > 0 {
+			log.Printf("udpfsd: setting peer timeout to %s", peerTimeout)
+			s.peerTimeout = peerTimeout
+		}
+	}
+}
+
 // Creates new udpfsd server
 func New(opts ...ServerOptFunc) (*Server, error) {
 	s := &Server{
@@ -98,6 +108,7 @@ func New(opts ...ServerOptFunc) (*Server, error) {
 		cMap:                 make(map[netip.AddrPort]*peer),
 		logMetrics:           false,
 		metricsLoggingPeriod: metricsLoggingPeriod,
+		peerTimeout:          defaultPeerTimeout,
 	}
 	for _, f := range opts {
 		f(s)
@@ -166,8 +177,8 @@ func (s *Server) cleanup() {
 	for range time.Tick(peerCleanupInterval) {
 		s.Lock()
 		for pAddr, p := range s.cMap {
-			if time.Since(p.lastSeen) >= peerTimeout {
-				log.Printf("udpfsd: peer %s hasn't been seen for more than %s, removing", pAddr, peerTimeout)
+			if time.Since(p.lastSeen) >= s.peerTimeout {
+				log.Printf("udpfsd: peer %s hasn't been seen for more than %s, removing", pAddr, s.peerTimeout)
 				p.Connection.Close()
 				p.Connection = nil
 				delete(s.cMap, pAddr)
