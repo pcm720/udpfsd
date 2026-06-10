@@ -33,7 +33,7 @@ var (
 	logMetricsPeriod     = flag.String("metrics-period", "", "Metric logging period in Go time.Duration format\nEnvironment variable: METRICS_PERIOD (default 1m = 1 minute)")
 	disableCompression   = flag.Bool("no-compression", false, fmt.Sprintf("Disable transparent decompression for %s\nEnvironment variable: NO_COMPRESSION", strings.Join(compression.GetSupportedFormats(), ", ")))
 	compressionCacheSize = flag.Int("compression-cache-size", 32, "Number of decompressed blocks to cache per file\nEnvironment variable: COMPRESSION_CACHE_SIZE")
-	peerTimeout          = flag.String("peer-timeout", "", "Time before inactive peer gets removed, minutes\nEnvironment variable: PEER_TIMEOUT (default 1h = 1 hour")
+	peerTimeout          = flag.String("peer-timeout", "", "Time before inactive peer gets removed in Go time.Duration format\nEnvironment variable: PEER_TIMEOUT (default 1h = 1 hour")
 )
 
 func main() {
