@@ -22,7 +22,7 @@ import (
 var Version string = "unknown"
 
 var (
-	root                 = flag.String("fsroot", "", "Root directory to serve files from\nEnvironment variable: FSROOT")
+	root                 = flag.String("fsroot", "./fsroot", "Root directory to serve files from\nEnvironment variable: FSROOT")
 	path                 = flag.String("bdpath", "", "Path to block device/image to serve\nEnvironment variable: BDPATH")
 	port                 = flag.Int("port", udprdma.UDPFSPort, "UDP port to listen on for discovery packets\nEnvironment variable: PORT")
 	bindIP               = flag.String("bind", "", "Address and port for data connection (e.g. 0.0.0.0:62966 or 192.168.1.1:0)\nEnvironment variable: BIND (default :0 = any port)")
@@ -33,7 +33,7 @@ var (
 	logMetricsPeriod     = flag.String("metrics-period", "", "Metric logging period in Go time.Duration format\nEnvironment variable: METRICS_PERIOD (default 1m = 1 minute)")
 	disableCompression   = flag.Bool("no-compression", false, fmt.Sprintf("Disable transparent decompression for %s\nEnvironment variable: NO_COMPRESSION", strings.Join(compression.GetSupportedFormats(), ", ")))
 	compressionCacheSize = flag.Int("compression-cache-size", 32, "Number of decompressed blocks to cache per file\nEnvironment variable: COMPRESSION_CACHE_SIZE")
-	peerTimeout          = flag.String("peer-timeout", "", "Time before inactive peer gets removed in Go time.Duration format\nEnvironment variable: PEER_TIMEOUT (default 1h = 1 hour")
+	peerTimeout          = flag.String("peer-timeout", "", "Time before inactive peer gets removed in Go time.Duration format\nEnvironment variable: PEER_TIMEOUT (default 1h = 1 hour)")
 )
 
 func main() {
@@ -67,7 +67,9 @@ func main() {
 	// Initialize filesystem backend
 	fsbackend, err := fs.NewBackend(fsopts...)
 	if err != nil {
-		log.Fatalf("failed to initialize filesystem: %v\n", err)
+		log.Printf("failed to initialize filesystem: %v\n\n", err)
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	var metricsPeriod time.Duration

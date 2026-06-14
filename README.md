@@ -68,7 +68,10 @@ Or serve a block device image:
 $ udpfsd -bdpath /path/to/image.chd
 ```
 
-At least one of `-fsroot` or `-bdpath` is required; if you omit both, the server prints an error and exits. Both options can be used at the same time.
+Both options can be used at the same time.
+
+At least one of `-fsroot` or `-bdpath` is required; if you omit both, the server will attempt to use `fsroot` directory in its current working directory as filesystem root.  
+If this directory does not exist, the server prints an error and exits.
 
 ### Configuration
 
@@ -77,7 +80,7 @@ Environment variable names are the uppercase form of the flag name with hyphens 
 
 | Environment Variable | Flag | Description |
 |---------------------|--------------------|-------------|
-| `FSROOT` | `-fsroot` | Root directory to serve files from |
+| `FSROOT` | `-fsroot` | Root directory to serve files from (default: `./fsroot`) |
 | `BDPATH` | `-bdpath` | Path to block device/image to serve |
 | `PORT` | `-port` | UDP port for discovery and data (default: 62966) |
 | `BIND` | `-bind` | Address and port for data connection, e.g. `0.0.0.0:62966` or `192.168.1.1:0` (default: `:0` = any port) |
@@ -88,6 +91,7 @@ Environment variable names are the uppercase form of the flag name with hyphens 
 | `METRICS_PERIOD` | `-metrics-period` | Metric logging period in Go time.Duration format (default: 1m) |
 | `NO_COMPRESSION` | `-no-compression` | Disable transparent decompression for CHD/CSO/ZSO (enabled by default) |
 | `COMPRESSION_CACHE_SIZE` | `-compression-cache-size` | Number of cached blocks per file (default: 32) |
+| `PEER_TIMEOUT` | `-peer-timeout` | Time before inactive peer gets removed in Go time.Duration format (default: 1h) |
 
 ### Limitations
 
