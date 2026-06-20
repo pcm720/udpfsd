@@ -21,8 +21,10 @@ import (
 // Version is set at build time via -ldflags "-X main.Version=..."
 var Version string = "unknown"
 
+const defaultFsRoot = "./fsroot"
+
 var (
-	root                 = flag.String("fsroot", "./fsroot", "Root directory to serve files from\nEnvironment variable: FSROOT")
+	root                 = flag.String("fsroot", "", "Root directory to serve files from\nEnvironment variable: FSROOT")
 	path                 = flag.String("bdpath", "", "Path to block device/image to serve\nEnvironment variable: BDPATH")
 	port                 = flag.Int("port", udprdma.UDPFSPort, "UDP port to listen on for discovery packets\nEnvironment variable: PORT")
 	bindIP               = flag.String("bind", "", "Address and port for data connection (e.g. 0.0.0.0:62966 or 192.168.1.1:0)\nEnvironment variable: BIND (default :0 = any port)")
@@ -47,8 +49,7 @@ func main() {
 	loadEnvironment()
 
 	if *path == "" && *root == "" {
-		flag.Usage()
-		os.Exit(1)
+		*root = defaultFsRoot
 	}
 
 	// Build FS backend options
