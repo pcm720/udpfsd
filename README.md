@@ -36,7 +36,8 @@ Download the archive for your platform and extract it.
 
 | Platform | Architecture               | Release archive                      |
 |----------|----------------------------|--------------------------------------|
-| Linux    | AMD64                      | `udpfsd-linux-amd64-<version>.zip`   |
+| Linux    | IA-32 (x86)                | `udpfsd-linux-x86-<version>.zip`     |
+| Linux    | AMD64 (x86-64)             | `udpfsd-linux-amd64-<version>.zip`   |
 | Linux    | ARM 64-bit                 | `udpfsd-linux-arm64-<version>.zip`   |
 | Linux    | ARM v7 (32-bit)            | `udpfsd-linux-armv7-<version>.zip`   |
 | Linux    | ARM v6 (32-bit)            | `udpfsd-linux-armv6-<version>.zip`   |
@@ -45,7 +46,8 @@ Download the archive for your platform and extract it.
 | Linux    | RISC-V (64-bit)            | `udpfsd-linux-riscv64-<version>.zip` |
 | macOS    | AMD64                      | `udpfsd-macos-amd64-<version>.zip`   |
 | macOS    | ARM 64-bit (Apple Silicon) | `udpfsd-macos-arm64-<version>.zip`   |
-| Windows  | AMD64                      | `udpfsd-windows-amd64-<version>.zip` |
+| Windows  | IA-32 (x86)                | `udpfsd-windows-x86-<version>.zip`   |
+| Windows  | AMD64 (x86-64)             | `udpfsd-windows-amd64-<version>.zip` |
 | Windows  | ARM 64-bit                 | `udpfsd-windows-arm64-<version>.zip` |
 
 > **Note:** Pre-built binaries support only CSO and ZSO.  

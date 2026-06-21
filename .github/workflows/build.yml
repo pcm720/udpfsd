@@ -48,9 +48,9 @@ jobs:
         run: |
           cd build
           VERSION="${{ steps.version.outputs.version }}"
-          for bin in udpfsd-linux-amd64 udpfsd-linux-arm64 udpfsd-linux-armv7 udpfsd-linux-armv6 udpfsd-linux-mipseb udpfsd-linux-mipsel udpfsd-linux-riscv64 \
+          for bin in udpfsd-linux-x86 udpfsd-linux-amd64 udpfsd-linux-arm64 udpfsd-linux-armv7 udpfsd-linux-armv6 udpfsd-linux-mipseb udpfsd-linux-mipsel udpfsd-linux-riscv64 \
                       udpfsd-macos-amd64 udpfsd-macos-arm64 \
-                      udpfsd-windows-amd64.exe udpfsd-windows-arm64.exe; do
+                      udpfsd-windows-x86.exe udpfsd-windows-amd64.exe udpfsd-windows-arm64.exe; do
             if [[ "$bin" == *.exe ]]; then
               outname=udpfsd.exe
             else
