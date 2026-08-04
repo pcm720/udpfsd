@@ -13,7 +13,8 @@ import (
 func (s *Server) dataHandler() {
 	defer s.wg.Done()
 
-	s.dataConn.SetReadBuffer(1 << 20)
+	_ = s.dataConn.SetReadBuffer(1 << 20)
+	_ = s.dataConn.SetWriteBuffer(1 << 20)
 	buf := make([]byte, 2048)
 	for {
 		n, addr, err := s.dataConn.ReadFromUDP(buf)
@@ -41,11 +42,13 @@ func (s *Server) handleData(data []byte, addr *net.UDPAddr) {
 	c, ok := s.cMap[addr.AddrPort()]
 	if !ok {
 		log.Printf("[%s]: creating new connection", addr)
+		conn := s.dataConn
+		writeTo := func(a *net.UDPAddr, payload []byte) {
+			_, _ = conn.WriteToUDPAddrPort(payload, a.AddrPort())
+		}
 		c = &peer{
 			udpfs.NewConnection(
-				udprdma.NewSession(*addr, func(addr *net.UDPAddr, data []byte) {
-					s.dataConn.WriteToUDP(data, addr)
-				}),
+				udprdma.NewSession(*addr, writeTo, newUDPBatchWriter(conn)),
 				s.fs,
 				s.verbose,
 				s.logMetrics,
