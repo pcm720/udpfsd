@@ -3,26 +3,27 @@
 package udprdma
 
 import (
-	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
 )
 
-// Session is a UDPRDMA data connection session (reliable send/recv state).
+// Session is a UDPRDMA data connection session
 type Session struct {
-	// Session statistics
 	creationTime time.Time
 	writeTo      func(addr *net.UDPAddr, data []byte)
+	writeBatch   func(addr *net.UDPAddr, packets [][]byte)
 	peerAddr     *net.UDPAddr
 
-	pendingSend   *pendingSend
 	resetCallback func()
+
 	// Transmit ring buffer
 	txBuffer     [2048]txPacket
 	txWriteIndex int
 	txReadIndex  int
+
+	// Single outstanding transfer
+	transfer transfer
 
 	metricContainer
 
@@ -34,9 +35,15 @@ type Session struct {
 
 	packetBuf [1500]byte
 
-	finAckTicker       *time.Ticker
+	// Retransmit state tracking
+	ackTimer           *time.Timer
+	ackTimerExpectSeq  uint16
+	ackTimerSeq        uint16 // Incremented on arm/stop to invalidate stale callbacks
+	ackWaitMode        ackWaitMode
 	retransmitAttempts int
-	closeChan          chan struct{}
+	finPending         bool // True after FIN sent until it is ACKed or retransmits time out
+
+	closed bool
 }
 
 type txPacket struct {
@@ -44,168 +51,109 @@ type txPacket struct {
 	seq  uint16
 }
 
-// pendingSend holds state for a multi-packet send waiting for window ACK.
-type pendingSend struct {
+// transfer holds state for one outbound multi-packet send.
+type transfer struct {
+	header   []byte
 	data     []byte
 	offset   int
 	maxChunk int
 }
 
 // NewSession creates a session that sends via writeTo.
-func NewSession(peerAddr net.UDPAddr, writeTo func(addr *net.UDPAddr, data []byte)) *Session {
+// If writeBatch is nil, writeTo is used to send batches in a loop
+func NewSession(peerAddr net.UDPAddr, writeTo func(addr *net.UDPAddr, data []byte), writeBatch func(addr *net.UDPAddr, packets [][]byte)) *Session {
 	s := &Session{
 		writeTo:      writeTo,
+		writeBatch:   writeBatch,
 		peerAddr:     &peerAddr,
 		creationTime: time.Now(),
-		pendingSend:  &pendingSend{},
-		finAckTicker: time.NewTicker(time.Minute),
-		closeChan:    make(chan struct{}),
+		txSeqNrAcked: 0xFFF, // nothing acked yet (−1 mod 4096)
 	}
-	s.finAckTicker.Stop()
+	if s.writeBatch == nil {
+		s.writeBatch = func(addr *net.UDPAddr, packets [][]byte) {
+			for _, p := range packets {
+				writeTo(addr, p)
+			}
+		}
+	}
+	// Single reusable timer
+	s.ackTimer = time.AfterFunc(time.Hour, s.ackTimerFunc)
+	s.ackTimer.Stop()
 	for i := range s.txBuffer {
 		s.txBuffer[i] = txPacket{
 			data: make([]byte, 1500),
 		}
 	}
-	go s.finAckTracker()
-
 	return s
 }
 
+// Close stops the TX loop.
 func (s *Session) Close() {
-	close(s.closeChan)
+	s.Lock()
+	if s.closed {
+		s.Unlock()
+		return
+	}
+	s.closed = true
+	s.stopAckTimer()
+	s.Unlock()
 }
 
-// Sets function that will be called on peer reset
+// SetResetCallback sets function that will be called on peer reset.
 func (s *Session) SetResetCallback(f func()) {
 	s.resetCallback = f
 }
 
-// Validates UDPRDMA DATA packet and returns payload to pass to the underlying protocol header or nil otherwise
-func (s *Session) ProcessDataPacket(data []byte) (payload []byte, err error) {
-	s.Lock()
-	defer s.Unlock()
-
-	hdr, err := UnpackHeader(data)
-	if err != nil || hdr.PacketType != PacketData {
-		return nil, fmt.Errorf("invalid header: %v", err)
-	}
-	header, err := UnpackDataHeader(data[2:6])
-	if err != nil {
-		return nil, fmt.Errorf("invalid data header: %v", err)
-	}
-
-	s.packetsRx++
-
-	payload = data[6:]
-	hdrSize := int(header.HdrWordCount) * 4
-	payloadSize := hdrSize + int(header.DataByteCount)
-	if payloadSize > len(payload) {
-		payloadSize = len(payload)
-	}
-
-	if header.Flags&uint8(DataFlagACK) != 0 {
-		s.OnAck(header.SeqNrAck)
-	}
-
-	if (payloadSize == 0) && (header.Flags&uint8(DataFlagACK) != 0) {
-		s.ContinuePendingSend()
-		return nil, nil
-	}
-	if (payloadSize == 0) && (header.Flags&uint8(DataFlagACK) == 0) {
-		// On NACK, roll back sequence number and retransmit the previous packet
-		s.txSeqNrAcked = (header.SeqNrAck - 1) & 0xFFF
-		s.RetransmitFrom(header.SeqNrAck)
-		s.peerNACKs++
-		return nil, nil
-	}
-
-	if hdr.SeqNr != s.rxSeqExpected {
-		prevSeq := (s.rxSeqExpected - 1) & 0xFFF
-		if hdr.SeqNr == prevSeq {
-			s.unexpectedSeqNrs++
-			s.sendACK(true)
-			log.Printf("[%s]: got previous packet %d (expected %d), acking", s.peerAddr, hdr.SeqNr, s.rxSeqExpected)
-			if s.pendingSend.data != nil {
-				// Retransmit from the last unacked packet
-				s.RetransmitFrom((s.txSeqNrAcked + 1) & 0xFFF)
-			}
-			return nil, nil
-		}
-		if hdr.SeqNr == 0 {
-			log.Printf("[%s]: got unexpected sequence number 0, assuming the peer was reset", s.peerAddr)
-			s.ResetSession()
-		} else {
-			s.unexpectedSeqNrs++
-			log.Printf("[%s]: got unexpected sequence number %d (expected %d)", s.peerAddr, hdr.SeqNr, s.rxSeqExpected)
-			s.sendACK(false)
-			return nil, nil
-		}
-	}
-
-	// Update expected RX number and ACK the packet
-	s.rxSeqExpected = (hdr.SeqNr + 1) & 0xFFF
-	s.sendACK(true)
-
-	return payload[:payloadSize], nil
-}
-
-// SendData sends a single DATA packet with full payload and FIN.
-func (s *Session) SendData(payload []byte) {
-	s.Lock()
-	defer s.Unlock()
-
-	s.SendDataPacket(payload, true, 0)
-}
-
-// SendRawDataWithHeader sends header + data with header on first packet; may set pending and return.
-func (s *Session) SendRawDataWithHeader(header, data []byte) {
-	s.Lock()
-	defer s.Unlock()
-
+// ResetSession resets session state (e.g. on peer reset, seq=0).
+// Assumes the lock is acquired
+func (s *Session) ResetSession() {
+	s.txSeqNr = 0
+	s.txSeqNrAcked = 0xFFF
 	s.txReadIndex = 0
 	s.txWriteIndex = 0
-	s.pendingSend.data = nil
-
-	maxChunk := optimalChunkSize(len(data))
-	firstDataMax := maxChunk
-	if len(header) < MaxDataPayload {
-		if MaxDataPayload-len(header) < firstDataMax {
-			firstDataMax = MaxDataPayload - len(header)
-		}
-	}
-	firstChunkSize := firstDataMax
-	if firstChunkSize > len(data) {
-		firstChunkSize = len(data)
-	}
-
-	firstPayload := s.packetBuf[:firstChunkSize+len(header)]
-	copy(firstPayload, header)
-	copy(firstPayload[len(header):], data[:firstChunkSize])
-
-	fin := firstChunkSize >= len(data)
-	s.SendDataPacket(firstPayload, fin, len(header))
-	offset := firstChunkSize
-	for offset < len(data) {
-		if s.InFlight() >= SendWindow {
-			s.pendingSend.data = data
-			s.pendingSend.offset = offset
-			s.pendingSend.maxChunk = maxChunk
-			return
-		}
-		chunkSize := maxChunk
-		if offset+chunkSize > len(data) {
-			chunkSize = len(data) - offset
-		}
-		fin = offset+chunkSize >= len(data)
-		s.SendDataPacket(data[offset:offset+chunkSize], fin, 0)
-		offset += chunkSize
+	s.rxSeqExpected = 0
+	s.stopAckTimer()
+	s.retransmitAttempts = 0
+	s.finPending = false
+	s.peerResets++
+	s.clearTransfer()
+	if s.resetCallback != nil {
+		s.resetCallback()
 	}
 }
 
-// SendACK sends an ACK or NACK packet (no payload).
-func (s *Session) SendACK(ack bool) {
-	s.Lock()
-	defer s.Unlock()
-	s.sendACK(ack)
+// InFlight returns the number of unacknowledged packets.
+func (s *Session) InFlight() int {
+	if s.txReadIndex == s.txWriteIndex {
+		return 0
+	}
+	return int((s.txSeqNr - s.txSeqNrAcked - 1) & 0xFFF)
+}
+
+// seqBetween reports whether seq is in [start, end] on the 12-bit ring.
+func seqBetween(start, seq, end uint16) bool {
+	start &= 0xFFF
+	seq &= 0xFFF
+	end &= 0xFFF
+	if start <= end {
+		return seq >= start && seq <= end
+	}
+	return seq >= start || seq <= end
+}
+
+// Clears the pending transfer
+func (s *Session) clearTransfer() {
+	s.transfer.header = nil
+	s.transfer.data = nil
+	s.transfer.offset = -1
+}
+
+// resetSendState clears the TX buffer and transfer state.
+// Assumes the lock is acquired
+func (s *Session) resetSendState() {
+	s.txReadIndex = 0
+	s.txWriteIndex = 0
+	s.stopAckTimer()
+	s.retransmitAttempts = 0
+	s.finPending = false
 }

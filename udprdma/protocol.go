@@ -22,10 +22,11 @@ const (
 
 // Flow control
 const (
-	SendWindow        = 8                      // Max unacked packets in flight
-	MaxDataPayload    = 1408                   // Max UDPRDMA data payload per packet
-	RetransmitTimeout = 500 * time.Millisecond // Max wait before retransmitting if no ACK/NACK received
-	MaxRetransmits    = 4
+	SendWindow       = 8                      // Max unacked packets in flight
+	MaxDataPayload   = 1408                   // Max UDPRDMA data payload per packet
+	FinAckTimeout    = 500 * time.Millisecond // FIN ACK timeout
+	WindowAckTimeout = 100 * time.Millisecond // Mid-transfer window ACK timeout
+	MaxRetransmits   = 4                      // Max retransmit attempts
 )
 
 // PacketType is the UDPRDMA packet type (4 bits)
