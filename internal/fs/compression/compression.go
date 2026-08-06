@@ -83,17 +83,19 @@ func GetSupportedExtensions() []string {
 
 // Retrieves os.FileInfo for compressed ISO
 // Returns nil if file is invalid
-func GetStat(path string) (fi os.FileInfo) {
+func GetStat(path string) os.FileInfo {
 	ext := strings.ToLower(filepath.Ext(path))
+	var fstat *common.CompressedInfo = nil
 	switch {
 	case slices.Contains(zso.Extensions, ext):
-		fi = zso.GetStat(path)
+		fstat = zso.GetStat(path)
 	case slices.Contains(cso.Extensions, ext):
-		fi = cso.GetStat(path)
+		fstat = cso.GetStat(path)
 	case slices.Contains(chd.Extensions, ext):
-		fi = chd.GetStat(path)
-	default:
-		fi = nil
+		fstat = chd.GetStat(path)
 	}
-	return fi
+	if fstat == nil {
+		return nil
+	}
+	return fstat
 }
