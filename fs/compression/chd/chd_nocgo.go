@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression/common"
+	"github.com/pcm720/udpfsd/fs/compression/common"
 )
 
 // Available is false when built without CGo (no libchdr).

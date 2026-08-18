@@ -1,4 +1,4 @@
-package udpfsd
+package server
 
 import (
 	"fmt"

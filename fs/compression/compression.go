@@ -6,11 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression/chd"
-	"github.com/pcm720/udpfsd/internal/fs/compression/common"
-	"github.com/pcm720/udpfsd/internal/fs/compression/cso"
-	"github.com/pcm720/udpfsd/internal/fs/compression/zso"
-	"github.com/pcm720/udpfsd/internal/fs/interfaces"
+	"github.com/pcm720/udpfsd/fs/compression/chd"
+	"github.com/pcm720/udpfsd/fs/compression/common"
+	"github.com/pcm720/udpfsd/fs/compression/cso"
+	"github.com/pcm720/udpfsd/fs/compression/zso"
+	"github.com/pcm720/udpfsd/fs/interfaces"
 )
 
 // BlockReader is the interface that compressed format backends must implement.

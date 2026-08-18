@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pcm720/udpfsd/internal/fs/interfaces"
+	"github.com/pcm720/udpfsd/fs/interfaces"
 	"github.com/pcm720/udpfsd/udpfs"
 )
 

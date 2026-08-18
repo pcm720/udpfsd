@@ -1,5 +1,5 @@
 // UDPFS server implementation
-package udpfsd
+package server
 
 import (
 	"context"

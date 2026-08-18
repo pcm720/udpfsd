@@ -1,6 +1,6 @@
 //go:build linux
 
-package udpfsd
+package server
 
 import (
 	"net"

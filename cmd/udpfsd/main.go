@@ -12,9 +12,9 @@ import (
 
 	"log"
 
-	"github.com/pcm720/udpfsd/internal/fs"
-	"github.com/pcm720/udpfsd/internal/fs/compression"
-	"github.com/pcm720/udpfsd/internal/udpfsd"
+	"github.com/pcm720/udpfsd/fs"
+	"github.com/pcm720/udpfsd/fs/compression"
+	"github.com/pcm720/udpfsd/server"
 	"github.com/pcm720/udpfsd/udprdma"
 )
 
@@ -87,20 +87,20 @@ func main() {
 	}
 
 	// Build server options
-	opts := []udpfsd.ServerOptFunc{
-		udpfsd.WithDiscoveryPort(*port),
-		udpfsd.WithDataIP(*bindIP),
-		udpfsd.WithFS(fsbackend),
-		udpfsd.WithPeerTimeout(peerTimeoutDuration),
+	opts := []server.ServerOptFunc{
+		server.WithDiscoveryPort(*port),
+		server.WithDataIP(*bindIP),
+		server.WithFS(fsbackend),
+		server.WithPeerTimeout(peerTimeoutDuration),
 	}
 	if *verbose {
-		opts = append(opts, udpfsd.WithVerbose())
+		opts = append(opts, server.WithVerbose())
 	}
 	if *logMetrics {
-		opts = append(opts, udpfsd.WithMetrics(metricsPeriod))
+		opts = append(opts, server.WithMetrics(metricsPeriod))
 	}
 	// Initialize server
-	server, err := udpfsd.New(opts...)
+	server, err := server.New(opts...)
 	if err != nil {
 		log.Fatalf("failed to initialize server: %v", err)
 	}

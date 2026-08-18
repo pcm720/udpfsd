@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression"
+	"github.com/pcm720/udpfsd/fs/compression"
 	"github.com/pcm720/udpfsd/udpfs"
 )
 

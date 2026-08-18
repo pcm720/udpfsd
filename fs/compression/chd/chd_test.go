@@ -1,3 +1,5 @@
+//go:build cgo && !nochd
+
 package chd
 
 import (

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression"
+	"github.com/pcm720/udpfsd/fs/compression"
 )
 
 // LogBackendInfo logs root dir and block device at startup.

@@ -24,7 +24,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression/common"
+	"github.com/pcm720/udpfsd/fs/compression/common"
 )
 
 // Available is true when built with CGo and libchdr.

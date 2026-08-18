@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pcm720/udpfsd/internal/fs/compression/common"
+	"github.com/pcm720/udpfsd/fs/compression/common"
 	"github.com/pierrec/lz4/v4"
 )
 
