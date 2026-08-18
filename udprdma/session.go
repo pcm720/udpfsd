@@ -3,6 +3,7 @@
 package udprdma
 
 import (
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ type Session struct {
 	writeTo      func(addr *net.UDPAddr, data []byte)
 	writeBatch   func(addr *net.UDPAddr, packets [][]byte)
 	peerAddr     *net.UDPAddr
+	logger       *slog.Logger
 
 	resetCallback func()
 
@@ -59,15 +61,31 @@ type transfer struct {
 	maxChunk int
 }
 
+// SessionOptFunc configures a Session.
+type SessionOptFunc func(s *Session)
+
+// WithLogger sets the session logger. By default, log output is discarded.
+func WithLogger(l *slog.Logger) SessionOptFunc {
+	return func(s *Session) {
+		if l != nil {
+			s.logger = l
+		}
+	}
+}
+
 // NewSession creates a session that sends via writeTo.
 // If writeBatch is nil, writeTo is used to send batches in a loop
-func NewSession(peerAddr net.UDPAddr, writeTo func(addr *net.UDPAddr, data []byte), writeBatch func(addr *net.UDPAddr, packets [][]byte)) *Session {
+func NewSession(peerAddr net.UDPAddr, writeTo func(addr *net.UDPAddr, data []byte), writeBatch func(addr *net.UDPAddr, packets [][]byte), opts ...SessionOptFunc) *Session {
 	s := &Session{
 		writeTo:      writeTo,
 		writeBatch:   writeBatch,
 		peerAddr:     &peerAddr,
+		logger:       slog.New(slog.DiscardHandler),
 		creationTime: time.Now(),
 		txSeqNrAcked: 0xFFF, // nothing acked yet (−1 mod 4096)
+	}
+	for _, f := range opts {
+		f(s)
 	}
 	if s.writeBatch == nil {
 		s.writeBatch = func(addr *net.UDPAddr, packets [][]byte) {

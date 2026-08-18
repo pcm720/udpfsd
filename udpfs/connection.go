@@ -3,6 +3,7 @@
 package udpfs
 
 import (
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -14,8 +15,9 @@ import (
 // Connection wraps a UDPRDMA session and an FS, and provides UDPFS reply encoding, sending, and request dispatch.
 // Create with NewConnection; then call HandlePayload for each received UDPFS data payload.
 type Connection struct {
-	fs   FS
-	sess *udprdma.Session
+	fs     FS
+	sess   *udprdma.Session
+	logger *slog.Logger
 	*metricCollector
 
 	usedHandles       map[int32]cachedHandle
@@ -23,7 +25,6 @@ type Connection struct {
 
 	sync.Mutex
 	dataBuffer [128 * 1024]byte // 128 KB read buffer
-	verbose    bool
 }
 
 type cachedHandle struct {
@@ -33,19 +34,32 @@ type cachedHandle struct {
 	isDir bool
 }
 
+// ConnectionOptFunc configures a Connection.
+type ConnectionOptFunc func(c *Connection)
+
+// WithLogger sets the connection logger. By default, log output is discarded.
+func WithLogger(l *slog.Logger) ConnectionOptFunc {
+	return func(c *Connection) {
+		if l != nil {
+			c.logger = l
+		}
+	}
+}
+
 // NewConnection returns a Connection that sends via the given session and dispatches requests to fs.
-func NewConnection(sess *udprdma.Session, fs FS, verbose bool, collectMetrics bool) *Connection {
+func NewConnection(sess *udprdma.Session, fs FS, opts ...ConnectionOptFunc) *Connection {
 	c := &Connection{
 		sess:              sess,
 		fs:                fs,
-		verbose:           verbose,
+		logger:            slog.New(slog.DiscardHandler),
+		metricCollector:   newMetricCollector(),
 		usedHandles:       make(map[int32]cachedHandle, 32),
 		activeWriteHandle: -1,
 	}
-	sess.SetResetCallback(c.ResetPeer)
-	if collectMetrics {
-		c.metricCollector = newMetricCollector()
+	for _, f := range opts {
+		f(c)
 	}
+	sess.SetResetCallback(c.ResetPeer)
 	return c
 }
 
@@ -53,8 +67,9 @@ func (c *Connection) GetUDPRDMASession() *udprdma.Session {
 	return c.sess
 }
 
-func (c *Connection) GetMetrics() ConnectionStats {
-	return c.metricCollector.GetMetrics()
+// Stats returns a snapshot of the connection's lifetime metrics.
+func (c *Connection) Stats() Metrics {
+	return c.metricCollector.snapshot()
 }
 
 // SendACK sends an ACK or NACK packet (no payload).

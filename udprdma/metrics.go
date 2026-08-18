@@ -10,7 +10,8 @@ type metricContainer struct {
 	peerResets       uint64
 }
 
-type SessionStats struct {
+// Metrics is a point-in-time snapshot of a Session's lifetime counters.
+type Metrics struct {
 	TotalPacketsTx       uint64
 	TotalPacketsRx       uint64
 	Retransmits          uint64
@@ -20,11 +21,12 @@ type SessionStats struct {
 	PeerResetCount       uint64
 }
 
-func (s *Session) GetMetrics() SessionStats {
+// Stats returns a snapshot of the session's lifetime counters.
+func (s *Session) Stats() Metrics {
 	s.Lock()
 	defer s.Unlock()
 
-	return SessionStats{
+	return Metrics{
 		TotalPacketsTx:       s.packetsTx,
 		TotalPacketsRx:       s.packetsRx,
 		Retransmits:          s.retransmits,

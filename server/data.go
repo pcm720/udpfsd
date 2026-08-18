@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"log"
 	"net"
 	"time"
 
@@ -20,12 +19,10 @@ func (s *Server) dataHandler() {
 		n, addr, err := s.dataConn.ReadFromUDP(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
-				log.Printf("udpfsd/data: connection has been closed")
+				s.logger.Info("data connection has been closed")
 				return
 			}
-			if s.verbose {
-				log.Printf("udpfsd/data: read error: %v", err)
-			}
+			s.logger.Debug("data read error", "err", err)
 			continue
 		}
 		if n < 6 {
@@ -41,17 +38,16 @@ func (s *Server) handleData(data []byte, addr *net.UDPAddr) {
 	s.Lock()
 	c, ok := s.cMap[addr.AddrPort()]
 	if !ok {
-		log.Printf("[%s]: creating new connection", addr)
+		s.logger.Info("creating new connection", "peer", addr)
 		conn := s.dataConn
 		writeTo := func(a *net.UDPAddr, payload []byte) {
 			_, _ = conn.WriteToUDPAddrPort(payload, a.AddrPort())
 		}
 		c = &peer{
 			udpfs.NewConnection(
-				udprdma.NewSession(*addr, writeTo, newUDPBatchWriter(conn)),
+				udprdma.NewSession(*addr, writeTo, newUDPBatchWriter(conn), udprdma.WithLogger(s.logger)),
 				s.fs,
-				s.verbose,
-				s.logMetrics,
+				udpfs.WithLogger(s.logger),
 			),
 			time.Now(),
 		}
@@ -64,9 +60,7 @@ func (s *Server) handleData(data []byte, addr *net.UDPAddr) {
 
 	payload, err := c.GetUDPRDMASession().ProcessDataPacket(data)
 	if err != nil {
-		if s.verbose {
-			log.Printf("udpfsd/data: [%s]: %v", addr, err)
-		}
+		s.logger.Debug("failed to process data packet", "peer", addr, "err", err)
 		return
 	}
 

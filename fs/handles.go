@@ -2,7 +2,6 @@ package fs
 
 import (
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -83,13 +82,13 @@ func (s *Backend) allocHandle(h handle) int32 {
 	if time.Since(oldestHandleTimestamp) >= handleMaxLastUsed {
 		// If the oldest handle hasn't been used for at least handleMaxLastUsed,
 		// close and reallocate its index to the new handle
-		log.Printf("fs: no free handles left, evicting handle %d", oldestHandle+1)
+		s.logger.Warn("no free handles left, evicting handle", "handle", oldestHandle+1)
 		s.handles[oldestHandle].Close()
 		s.handles[oldestHandle] = h
 		s.lastUsed[oldestHandle] = time.Now()
 		return int32(oldestHandle + 1)
 	}
-	log.Println("fs: no free handles left")
+	s.logger.Warn("no free handles left")
 	return -udpfs.EMFILE
 }
 

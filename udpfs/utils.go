@@ -1,8 +1,9 @@
 package udpfs
 
 import (
+	"context"
 	"encoding/binary"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -169,7 +170,12 @@ func PackGetstatReply(result int32, st StatInfo) []byte {
 	return b
 }
 
-func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) {
+// logPayload logs a parsed request at debug level. Payload re-parsing is
+// skipped entirely when debug logging is disabled.
+func (c *Connection) logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) {
+	if !c.logger.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
 	switch msgType {
 	case MsgOpenReq:
 		pathEnd := 0
@@ -179,48 +185,48 @@ func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) 
 		path := string(payload[8 : 8+pathEnd])
 		isDir := len(payload) > 1 && payload[1] != 0
 		if isDir {
-			log.Printf("[%s]: DOPEN %q: %d", addr, path, status)
+			c.logger.Debug("DOPEN", "peer", addr, "path", path, "status", status)
 		} else {
-			log.Printf("[%s]: OPEN %q: %d", addr, path, status)
+			c.logger.Debug("OPEN", "peer", addr, "path", path, "status", status)
 		}
 	case MsgCloseReq:
 		if len(payload) >= 8 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
-			log.Printf("[%s]: CLOSE handle=%d: %d", addr, handle, status)
+			c.logger.Debug("CLOSE", "peer", addr, "handle", handle, "status", status)
 		}
 	case MsgReadReq:
 		if len(payload) >= 12 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
 			size := uint32(payload[8]) | uint32(payload[9])<<8 | uint32(payload[10])<<16 | uint32(payload[11])<<24
-			log.Printf("[%s]: READ handle=%d size=%d: %d", addr, handle, size, status)
+			c.logger.Debug("READ", "peer", addr, "handle", handle, "size", size, "status", status)
 		}
 	case MsgWriteReq:
 		if len(payload) >= 12 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
 			size := uint32(payload[8]) | uint32(payload[9])<<8 | uint32(payload[10])<<16 | uint32(payload[11])<<24
-			log.Printf("[%s]: WRITE handle=%d size=%d: %d", addr, handle, size, status)
+			c.logger.Debug("WRITE", "peer", addr, "handle", handle, "size", size, "status", status)
 		}
 	case MsgWriteData:
 		if len(payload) >= 8 {
 			chunkNr := int32(uint32(payload[2]) | uint32(payload[3])<<8)
 			chunkSize := int32(uint32(payload[4]) | uint32(payload[5])<<8)
 			totalChunks := int32(uint32(payload[6]) | uint32(payload[7])<<8)
-			log.Printf("[%s]: WRITE_DATA chunk=%d size=%d total=%d: %d", addr, chunkNr, chunkSize, totalChunks, status)
+			c.logger.Debug("WRITE_DATA", "peer", addr, "chunk", chunkNr, "size", chunkSize, "total", totalChunks, "status", status)
 		}
 	case MsgWriteDone:
 		if len(payload) >= 8 {
 			result := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
-			log.Printf("[%s]: WRITE_DONE result=%d: %d", addr, result, status)
+			c.logger.Debug("WRITE_DONE", "peer", addr, "result", result, "status", status)
 		}
 	case MsgLseekReq:
 		if len(payload) >= 16 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
-			log.Printf("[%s]: LSEEK handle=%d: %d", addr, handle, status)
+			c.logger.Debug("LSEEK", "peer", addr, "handle", handle, "status", status)
 		}
 	case MsgDreadReq:
 		if len(payload) >= 8 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
-			log.Printf("[%s]: DREAD handle=%d: %d", addr, handle, status)
+			c.logger.Debug("DREAD", "peer", addr, "handle", handle, "status", status)
 		}
 	case MsgGetstatReq:
 		pathEnd := 0
@@ -228,25 +234,25 @@ func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) 
 			pathEnd++
 		}
 		path := string(payload[4 : 4+pathEnd])
-		log.Printf("[%s]: GETSTAT %q: %d", addr, path, status)
+		c.logger.Debug("GETSTAT", "peer", addr, "path", path, "status", status)
 	case MsgMkdirReq:
 		pathEnd := 0
 		for pathEnd < len(payload)-4 && payload[4+pathEnd] != 0 {
 			pathEnd++
 		}
-		log.Printf("[%s]: MKDIR %q: %d", addr, string(payload[4:4+pathEnd]), status)
+		c.logger.Debug("MKDIR", "peer", addr, "path", string(payload[4:4+pathEnd]), "status", status)
 	case MsgRemoveReq:
 		pathEnd := 0
 		for pathEnd < len(payload)-4 && payload[4+pathEnd] != 0 {
 			pathEnd++
 		}
-		log.Printf("[%s]: REMOVE %q: %d", addr, string(payload[4:4+pathEnd]), status)
+		c.logger.Debug("REMOVE", "peer", addr, "path", string(payload[4:4+pathEnd]), "status", status)
 	case MsgRmdirReq:
 		pathEnd := 0
 		for pathEnd < len(payload)-4 && payload[4+pathEnd] != 0 {
 			pathEnd++
 		}
-		log.Printf("[%s]: RMDIR %q: %d", addr, string(payload[4:4+pathEnd]), status)
+		c.logger.Debug("RMDIR", "peer", addr, "path", string(payload[4:4+pathEnd]), "status", status)
 	case MsgBreadReq:
 		if len(payload) >= 16 {
 			handle := int32(uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16 | uint32(payload[7])<<24)
@@ -254,7 +260,7 @@ func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) 
 			sectorNrLo := binary.LittleEndian.Uint32(payload[8:12])
 			sectorNrHi := binary.LittleEndian.Uint32(payload[12:16])
 			sectorNr := int64(sectorNrHi)<<32 | int64(sectorNrLo)
-			log.Printf("[%s]: BREAD handle=%d sector=%d sector_count=%d: %d", addr, handle, sectorNr, sectorCount, status)
+			c.logger.Debug("BREAD", "peer", addr, "handle", handle, "sector", sectorNr, "sector_count", sectorCount, "status", status)
 		}
 	case MsgBwriteReq:
 		if len(payload) >= 16 {
@@ -263,7 +269,7 @@ func logPayload(addr *net.UDPAddr, msgType MsgType, status int, payload []byte) 
 			sectorNrLo := binary.LittleEndian.Uint32(payload[8:12])
 			sectorNrHi := binary.LittleEndian.Uint32(payload[12:16])
 			sectorNr := int64(sectorNrHi)<<32 | int64(sectorNrLo)
-			log.Printf("[%s]: BWRITE handle=%d sector=%d sector_count=%d: %d", addr, handle, sectorNr, sectorCount, status)
+			c.logger.Debug("BWRITE", "peer", addr, "handle", handle, "sector", sectorNr, "sector_count", sectorCount, "status", status)
 		}
 	}
 }

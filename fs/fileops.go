@@ -2,8 +2,8 @@ package fs
 
 import (
 	"errors"
+	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,11 +25,11 @@ func (s *Backend) Open(path string, flag int, isDir bool) (handle int32, stat ud
 	openForWriting := open && !fileReadOnly
 
 	if wantWrite && (s.readOnly || open) {
-		log.Printf("fs: refusing to open %s for writing: file already opened or FS is read-only", fullPath)
+		s.logger.Warn("refusing to open file for writing: file already opened or FS is read-only", "path", fullPath)
 		return 0, udpfs.StatInfo{}, os.ErrPermission
 	}
 	if !wantWrite && openForWriting {
-		log.Printf("fs: refusing to open %s for reading: file already opened for writing", fullPath)
+		s.logger.Warn("refusing to open file for reading: file already opened for writing", "path", fullPath)
 		return 0, udpfs.StatInfo{}, os.ErrPermission
 	}
 
@@ -66,7 +66,7 @@ func (s *Backend) Open(path string, flag int, isDir bool) (handle int32, stat ud
 				compressedPath := strings.TrimSuffix(fullPath, filepath.Ext(fullPath))
 				if s.pathExists(compressedPath) {
 					// Handle compressed image
-					log.Printf("fs: decompressing %s\n", compressedPath)
+					s.logger.Info("decompressing", "path", compressedPath)
 					wrapper := compression.Open(compressedPath, s.compressionCacheSize)
 					if wrapper != nil {
 						st, _ := wrapper.Stat()
@@ -97,7 +97,7 @@ func (s *Backend) Open(path string, flag int, isDir bool) (handle int32, stat ud
 
 	f, err := os.OpenFile(fullPath, flag, 0644)
 	if err != nil {
-		log.Printf("fs: failed to open file %s with flag 0x%x: %v\n", fullPath, flag, err)
+		s.logger.Warn("failed to open file", "path", fullPath, "flag", fmt.Sprintf("%#x", flag), "err", err)
 		return 0, udpfs.StatInfo{}, err
 	}
 
@@ -128,7 +128,7 @@ func (s *Backend) Read(handle int32, size uint32, readBuffer []byte) (int32, []b
 
 	read, err := f.Read(readBuffer[:size])
 	if err != nil && err != os.ErrClosed && err != io.EOF {
-		log.Printf("fs: failed to read file %s: %v", f.Name(), err)
+		s.logger.Warn("failed to read file", "path", f.Name(), "err", err)
 		return 0, nil, err
 	}
 	return int32(read), readBuffer[:read], nil
@@ -195,7 +195,7 @@ func (s *Backend) CompleteWrite(handle int32) (n int32, err error) {
 		}
 		_, err = f.Write(data)
 		if err != nil {
-			log.Printf("fs: failed to write %s: %v", f.Name(), err)
+			s.logger.Warn("failed to write", "path", f.Name(), "err", err)
 			return 0, err
 		}
 		return 0, nil
@@ -205,7 +205,7 @@ func (s *Backend) CompleteWrite(handle int32) (n int32, err error) {
 	}
 	written, err := f.Write(data)
 	if err != nil {
-		log.Printf("fs: failed to write %s: %v", f.Name(), err)
+		s.logger.Warn("failed to write", "path", f.Name(), "err", err)
 		return 0, err
 	}
 	return int32(written), nil
@@ -344,7 +344,7 @@ func (s *Backend) Bread(handle int32, sectorNr int64, sectorCount uint16, readBu
 
 	n, err := f.Read(readBuffer[:int(sectorCount)*sectorSize])
 	if err != nil && err != io.EOF {
-		log.Printf("fs: failed to read %s: %v", f.Name(), err)
+		s.logger.Warn("failed to read", "path", f.Name(), "err", err)
 		return nil, err
 	}
 	readBuffer = readBuffer[:n]

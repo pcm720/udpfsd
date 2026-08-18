@@ -1,29 +1,10 @@
 package fs
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/pcm720/udpfsd/fs/compression"
 )
-
-// LogBackendInfo logs root dir and block device at startup.
-func (s *Backend) PrintFSInfo() {
-	s.Lock()
-	defer s.Unlock()
-	if s.fsRoot != "" {
-		log.Printf("fs: mounted root filesystem %s (read-only: %t)", s.fsRoot, s.readOnly)
-	}
-	if s.bdHandle != nil {
-		log.Printf("fs: mounted block device %s, (sectors: %d, sector size: %d, read-only: %t)", s.blockDevice, s.bdHandle.totalSectorCount, s.sectorSize, s.readOnly)
-	}
-	if s.enableCompression {
-		formats := compression.GetSupportedFormats()
-		log.Printf("fs: enabled decompression for %s\n", strings.Join(formats, ", "))
-	}
-}
 
 func (s *Backend) resolvePath(clientPath string) (string, bool) {
 	if s.fsRoot == "" {

@@ -3,7 +3,7 @@ package udpfs
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
+	"fmt"
 	"net"
 )
 
@@ -48,16 +48,12 @@ func (c *Connection) HandlePayload(addr *net.UDPAddr, payload []byte) {
 	case MsgBwriteReq:
 		statusCode = c.handleBwriteReq(addr, payload)
 	default:
-		log.Printf("[%s]: unknown message type: 0x%02x", addr, msgType)
+		c.logger.Warn("unknown message type", "peer", addr, "type", fmt.Sprintf("0x%02x", msgType))
 		c.SendACK(addr, true)
 		return
 	}
-	if c.verbose {
-		logPayload(addr, msgType, statusCode, payload)
-	}
-	if c.metricCollector != nil {
-		c.logMetric(msgType, statusCode)
-	}
+	c.logPayload(addr, msgType, statusCode, payload)
+	c.logMetric(msgType, statusCode)
 }
 
 // handleOpen parses OPEN_REQ payload, calls fs.Open, sends OPEN_REPLY.
@@ -78,9 +74,7 @@ func (c *Connection) handleOpen(addr *net.UDPAddr, payload []byte) int {
 	if !isDir {
 		// Retrieve cached file handle if peer was reset and tries to open the same file again
 		if h, ok := c.lookupHandle(path, flag); ok {
-			if c.verbose {
-				log.Printf("[%s]: reusing file handle %d for %s (mode %x)", addr, h, path, flag)
-			}
+			c.logger.Debug("reusing file handle", "peer", addr, "handle", h, "path", path, "mode", fmt.Sprintf("%#x", flag))
 			c.SendOpenReply(addr, h, StatInfo{})
 			return 0
 		}

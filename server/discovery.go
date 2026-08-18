@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"log"
 	"net"
 
 	"github.com/pcm720/udpfsd/udprdma"
@@ -17,12 +16,10 @@ func (s *Server) discoveryHandler() {
 		n, addr, err := s.discConn.ReadFromUDP(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
-				log.Printf("udpfsd/discovery: connection has been closed")
+				s.logger.Info("discovery connection has been closed")
 				return
 			}
-			if s.verbose {
-				log.Printf("udpfsd/discovery: read error: %v", err)
-			}
+			s.logger.Debug("discovery read error", "err", err)
 			continue
 		}
 		if n < 6 {
@@ -32,10 +29,10 @@ func (s *Server) discoveryHandler() {
 
 		reply, err := udprdma.ProcessDiscoveryPacket(buf[:n], udprdma.Service_UDPFS)
 		if err != nil {
-			log.Printf("udpfsd/discovery: [%s]: %v", addr, err)
+			s.logger.Warn("failed to process discovery packet", "peer", addr, "err", err)
 			continue
 		}
 		s.dataConn.WriteToUDP(reply, addr)
-		log.Printf("[%s]: discovery request received", addr)
+		s.logger.Info("discovery request received", "peer", addr)
 	}
 }

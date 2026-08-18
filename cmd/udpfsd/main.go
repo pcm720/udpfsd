@@ -3,14 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-
-	"log"
 
 	"github.com/pcm720/udpfsd/fs"
 	"github.com/pcm720/udpfsd/fs/compression"
@@ -21,7 +22,10 @@ import (
 // Version is set at build time via -ldflags "-X main.Version=..."
 var Version string = "unknown"
 
-const defaultFsRoot = "./fsroot"
+const (
+	defaultFsRoot        = "./fsroot"
+	defaultMetricsPeriod = time.Minute
+)
 
 var (
 	root                 = flag.String("fsroot", "", "Root directory to serve files from\nEnvironment variable: FSROOT")
@@ -52,12 +56,19 @@ func main() {
 		*root = defaultFsRoot
 	}
 
+	logLevel := slog.LevelInfo
+	if *verbose {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
 	// Build FS backend options
 	fsopts := []fs.BackendOptFunc{
 		fs.WithFSRoot(*root),
 		fs.WithBlockDevice(*path),
 		fs.WithSectorSize(*sectorSize),
 		fs.WithCompressionCacheSize(*compressionCacheSize),
+		fs.WithLogger(logger),
 	}
 	if *readOnly {
 		fsopts = append(fsopts, fs.WithReadOnly())
@@ -72,12 +83,16 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	logFSInfo(logger, fsbackend.Stats())
 
 	var metricsPeriod time.Duration
 	if *logMetricsPeriod != "" {
 		if metricsPeriod, err = time.ParseDuration(*logMetricsPeriod); err != nil {
 			metricsPeriod = 0
 		}
+	}
+	if metricsPeriod <= 0 {
+		metricsPeriod = defaultMetricsPeriod
 	}
 	var peerTimeoutDuration time.Duration
 	if *peerTimeout != "" {
@@ -92,27 +107,136 @@ func main() {
 		server.WithDataIP(*bindIP),
 		server.WithFS(fsbackend),
 		server.WithPeerTimeout(peerTimeoutDuration),
-	}
-	if *verbose {
-		opts = append(opts, server.WithVerbose())
-	}
-	if *logMetrics {
-		opts = append(opts, server.WithMetrics(metricsPeriod))
+		server.WithLogger(logger),
 	}
 	// Initialize server
-	server, err := server.New(opts...)
+	srv, err := server.New(opts...)
 	if err != nil {
 		log.Fatalf("failed to initialize server: %v", err)
 	}
 
-	if err := server.Start(); err != nil {
+	if err := srv.Start(); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
-	defer server.Close()
+	defer srv.Close()
+
+	// Periodically print server statistics to stdout
+	if *logMetrics {
+		stopMetrics := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(metricsPeriod)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					printStats(srv.Stats())
+				case <-stopMetrics:
+					return
+				}
+			}
+		}()
+		defer close(stopMetrics)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	log.Printf("%s signal received, shutting down gracefully", <-sig)
+}
+
+// logFSInfo logs the mounted filesystem and block device configuration.
+func logFSInfo(logger *slog.Logger, info fs.Metrics) {
+	if info.FSRoot != "" {
+		logger.Info("fs: mounted root filesystem", "path", info.FSRoot, "read_only", info.ReadOnly)
+	}
+	if info.BlockDevice != "" {
+		logger.Info("fs: mounted block device", "path", info.BlockDevice,
+			"sectors", info.TotalSectors, "sector_size", info.SectorSize, "read_only", info.ReadOnly)
+	}
+	if info.CompressionFormats != nil {
+		logger.Info("fs: enabled decompression", "formats", strings.Join(info.CompressionFormats, ", "))
+	}
+}
+
+// printStats prints a server metrics snapshot to stdout.
+func printStats(stats server.Metrics) {
+	fmt.Printf("\n"+
+		"========== Server statistics (%s) ==========\n"+
+		"Uptime: %s\n",
+		time.Now().Format(time.DateTime), stats.Uptime.Round(time.Second))
+
+	for i := range stats.Peers {
+		printPeerMetrics(&stats.Peers[i])
+	}
+	fmt.Println("=============================================================")
+}
+
+// printPeerMetrics prints formatted metrics for a single peer.
+func printPeerMetrics(p *server.PeerMetrics) {
+	fmt.Printf("\n=== Peer: %s ===\nLast seen: %s\n", p.Addr.String(), p.LastSeen.Format(time.DateTime))
+
+	// Command counts
+	var cmdLines []string
+	for msgType, count := range p.UDPFS.CommandCounts {
+		if count > 0 {
+			cmdLines = append(cmdLines, fmt.Sprintf("%s: %d", msgType.String(), count))
+		}
+	}
+	sort.Strings(cmdLines)
+	fmt.Printf("Commands: %s\n", strings.Join(cmdLines, ", "))
+
+	// Error counts
+	var errCount int64
+	for _, count := range p.UDPFS.ErrorCounts {
+		errCount += count
+	}
+	if errCount > 0 {
+		fmt.Printf("Errors: %d total\n", errCount)
+		for msgType, count := range p.UDPFS.ErrorCounts {
+			if count > 0 {
+				fmt.Printf("\t%s: %d\n", msgType.String(), count)
+			}
+		}
+	}
+
+	fmt.Printf("\n"+
+		"Read:  %s @ %s\n"+
+		"Write: %s @ %s\n"+
+		"Total UDPRDMA packets: RX: %d, TX: %d\n"+
+		"Peer resets: %d, Peer NACKs: %d\n"+
+		"Retransmits: %d, NACKs: %d, Out-of-order packets: %d\n",
+		formatBytes(p.UDPFS.BytesTx), formatRate(p.UDPFS.AvgTxThroughput),
+		formatBytes(p.UDPFS.BytesRx), formatRate(p.UDPFS.AvgRxThroughput),
+		p.UDPRDMA.TotalPacketsRx, p.UDPRDMA.TotalPacketsTx,
+		p.UDPRDMA.PeerResetCount, p.UDPRDMA.PeerNACKCount,
+		p.UDPRDMA.Retransmits, p.UDPRDMA.NACKCount, p.UDPRDMA.UnexpectedSeqNrCount,
+	)
+}
+
+// Format bytes to human readable string (B, KB, MB, TB only)
+func formatBytes(bytes int64) string {
+	const unit = 1024.0
+	switch {
+	case bytes < unit:
+		return fmt.Sprintf("%d B", bytes)
+	case bytes < unit*unit:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/unit)
+	case bytes < unit*unit*unit:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/(unit*unit))
+	}
+	return fmt.Sprintf("%.3f GB", float64(bytes)/(unit*unit*unit))
+}
+
+// Format throughput rate to human readable string (B/s, KB/s, MB/s only)
+func formatRate(rate float64) string {
+	const unit = 1024.0
+
+	if rate < unit {
+		return fmt.Sprintf("%.0f B/s", rate)
+	} else if rate < unit*unit {
+		return fmt.Sprintf("%.1f KB/s", rate/unit)
+	}
+
+	return fmt.Sprintf("%.2f MB/s", rate/(unit*unit))
 }
 
 func loadEnvironment() {

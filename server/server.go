@@ -4,7 +4,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strconv"
@@ -33,12 +33,14 @@ type Server struct {
 	bindIP string
 	wg     sync.WaitGroup
 
-	port                 int
-	metricsLoggingPeriod time.Duration
+	port int
+
+	// stopCh is closed by Close to stop background goroutines
+	stopCh   chan struct{}
+	stopOnce sync.Once
 
 	sync.Mutex
-	verbose    bool
-	logMetrics bool
+	logger *slog.Logger
 }
 
 type peer struct {
@@ -47,9 +49,8 @@ type peer struct {
 }
 
 const (
-	defaultPeerTimeout   = time.Hour
-	peerCleanupInterval  = 30 * time.Second
-	metricsLoggingPeriod = time.Minute
+	defaultPeerTimeout  = time.Hour
+	peerCleanupInterval = 30 * time.Second
 )
 
 type ServerOptFunc func(s *Server)
@@ -69,9 +70,14 @@ func WithDataIP(ip string) func(s *Server) {
 		}
 	}
 }
-func WithVerbose() func(s *Server) {
+
+// WithLogger sets the server logger. The logger is passed down to per-peer
+// connections and UDPRDMA sessions. By default, log output is discarded.
+func WithLogger(l *slog.Logger) ServerOptFunc {
 	return func(s *Server) {
-		s.verbose = true
+		if l != nil {
+			s.logger = l
+		}
 	}
 }
 
@@ -83,19 +89,9 @@ func WithFS(fs udpfs.FS) func(s *Server) {
 	}
 }
 
-func WithMetrics(loggingPeriod time.Duration) func(s *Server) {
-	return func(s *Server) {
-		if loggingPeriod > 0 {
-			s.metricsLoggingPeriod = loggingPeriod
-		}
-		s.logMetrics = true
-	}
-}
-
 func WithPeerTimeout(peerTimeout time.Duration) func(s *Server) {
 	return func(s *Server) {
 		if peerTimeout > 0 {
-			log.Printf("udpfsd: setting peer timeout to %s", peerTimeout)
 			s.peerTimeout = peerTimeout
 		}
 	}
@@ -104,11 +100,11 @@ func WithPeerTimeout(peerTimeout time.Duration) func(s *Server) {
 // Creates new udpfsd server
 func New(opts ...ServerOptFunc) (*Server, error) {
 	s := &Server{
-		port:                 udprdma.UDPFSPort,
-		cMap:                 make(map[netip.AddrPort]*peer),
-		logMetrics:           false,
-		metricsLoggingPeriod: metricsLoggingPeriod,
-		peerTimeout:          defaultPeerTimeout,
+		port:        udprdma.UDPFSPort,
+		cMap:        make(map[netip.AddrPort]*peer),
+		peerTimeout: defaultPeerTimeout,
+		logger:      slog.New(slog.DiscardHandler),
+		stopCh:      make(chan struct{}),
 	}
 	for _, f := range opts {
 		f(s)
@@ -152,54 +148,47 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	s.Lock()
 	s.startTime = time.Now()
+	s.Unlock()
 
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.discoveryHandler()
-	log.Printf("udpfsd: listening for incoming discovery packets on %s", s.discConn.LocalAddr())
+	s.logger.Info("listening for incoming discovery packets", "addr", s.discConn.LocalAddr())
 	go s.dataHandler()
-	log.Printf("udpfsd: listening for incoming data packets on %s", s.dataConn.LocalAddr())
+	s.logger.Info("listening for incoming data packets", "addr", s.dataConn.LocalAddr())
 	go s.cleanup()
-
-	if s.logMetrics {
-		go s.metricsLogger()
-	}
 	return nil
 }
 
+// Close stops the packet handlers and the peer cleanup loop, then waits for them to finish.
 func (s *Server) Close() {
+	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.dataConn.Close()
 	s.discConn.Close()
 	s.wg.Wait()
 }
 
 func (s *Server) cleanup() {
-	for range time.Tick(peerCleanupInterval) {
-		s.Lock()
-		for pAddr, p := range s.cMap {
-			if time.Since(p.lastSeen) >= s.peerTimeout {
-				log.Printf("udpfsd: peer %s hasn't been seen for more than %s, removing", pAddr, s.peerTimeout)
-				p.Connection.Close()
-				p.Connection = nil
-				delete(s.cMap, pAddr)
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(peerCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.Lock()
+			for pAddr, p := range s.cMap {
+				if time.Since(p.lastSeen) >= s.peerTimeout {
+					s.logger.Warn("peer hasn't been seen for more than the timeout, removing", "peer", pAddr, "timeout", s.peerTimeout)
+					p.Connection.Close()
+					p.Connection = nil
+					delete(s.cMap, pAddr)
+				}
 			}
+			s.Unlock()
 		}
-		s.Unlock()
-	}
-}
-
-func (s *Server) metricsLogger() {
-	for range time.Tick(s.metricsLoggingPeriod) {
-		s.Lock()
-		fmt.Printf(`
-========== Server statistics (%s) ==========
-Uptime: %s
-`, time.Now().Format(time.DateTime), time.Since(s.startTime).Round(time.Second))
-
-		for pAddr, p := range s.cMap {
-			s.printPeerStats(pAddr.String(), p)
-		}
-		fmt.Println("=============================================================")
-		s.Unlock()
 	}
 }

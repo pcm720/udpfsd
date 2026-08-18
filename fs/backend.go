@@ -3,6 +3,7 @@ package fs
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,6 +29,7 @@ type Backend struct {
 	blockDevice          string
 	sectorSize           int
 	compressionCacheSize int
+	logger               *slog.Logger
 
 	sync.Mutex
 	readOnly          bool
@@ -80,6 +82,15 @@ func WithCompressionCacheSize(ccsize int) func(s *Backend) {
 	}
 }
 
+// WithLogger sets the backend logger. By default, log output is discarded.
+func WithLogger(l *slog.Logger) BackendOptFunc {
+	return func(s *Backend) {
+		if l != nil {
+			s.logger = l
+		}
+	}
+}
+
 // Ensure Backend implements udpfs.FS at compile time.
 var _ udpfs.FS = (*Backend)(nil)
 
@@ -97,6 +108,7 @@ func NewBackend(opts ...BackendOptFunc) (*Backend, error) {
 		readOnly:             false,
 		enableCompression:    false,
 		compressionCacheSize: 0,
+		logger:               slog.New(slog.DiscardHandler),
 	}
 	for _, o := range opts {
 		o(s)
@@ -129,8 +141,6 @@ func NewBackend(opts ...BackendOptFunc) (*Backend, error) {
 			totalSectorCount: info.Size() / int64(s.sectorSize),
 		}
 	}
-	// Print information about the mounted filesystem/block device to stdout
-	s.PrintFSInfo()
 	return s, nil
 }
 

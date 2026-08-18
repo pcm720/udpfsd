@@ -1,9 +1,6 @@
 package udprdma
 
-import (
-	"fmt"
-	"log"
-)
+import "fmt"
 
 // ProcessDataPacket validates a UDPRDMA DATA packet and returns payload for the
 // underlying protocol, or nil otherwise
@@ -48,7 +45,7 @@ func (s *Session) ProcessDataPacket(data []byte) (payload []byte, err error) {
 		prevSeq := (s.rxSeqExpected - 1) & 0xFFF
 		if hdr.SeqNr == prevSeq {
 			s.unexpectedSeqNrs++
-			log.Printf("[%s]: got previous packet %d (expected %d), acking", s.peerAddr, hdr.SeqNr, s.rxSeqExpected)
+			s.logger.Warn("got previous packet, acking", "peer", s.peerAddr, "seq", hdr.SeqNr, "expected", s.rxSeqExpected)
 			retransmit := s.transfer.data != nil
 			retransmitFrom := (s.txSeqNrAcked + 1) & 0xFFF
 			s.sendACK(true)
@@ -61,11 +58,11 @@ func (s *Session) ProcessDataPacket(data []byte) (payload []byte, err error) {
 			return nil, nil
 		}
 		if hdr.SeqNr == 0 {
-			log.Printf("[%s]: got unexpected sequence number 0, assuming the peer was reset", s.peerAddr)
+			s.logger.Warn("got unexpected sequence number 0, assuming the peer was reset", "peer", s.peerAddr)
 			s.ResetSession()
 		} else {
 			s.unexpectedSeqNrs++
-			log.Printf("[%s]: got unexpected sequence number %d (expected %d)", s.peerAddr, hdr.SeqNr, s.rxSeqExpected)
+			s.logger.Warn("got unexpected sequence number", "peer", s.peerAddr, "seq", hdr.SeqNr, "expected", s.rxSeqExpected)
 			s.sendACK(false)
 			if isAck {
 				s.onPeerAck(header.SeqNrAck)

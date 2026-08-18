@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-type ConnectionStats struct {
+// Metrics is a point-in-time snapshot of a Connection's lifetime counters.
+type Metrics struct {
 	// Lifetime counts
 	CommandCounts map[MsgType]int64 // Per-command counts
 	ErrorCounts   map[MsgType]int64 // Per-command errors
@@ -93,7 +94,8 @@ func (c *metricCollector) updateThroughput(byteCount int, isWrite bool) {
 	}
 }
 
-func (c *metricCollector) GetMetrics() ConnectionStats {
+// snapshot returns a copy of the collected metrics.
+func (c *metricCollector) snapshot() Metrics {
 	c.Lock()
 	defer c.Unlock()
 
@@ -107,7 +109,7 @@ func (c *metricCollector) GetMetrics() ConnectionStats {
 		errCounts[k] = v
 	}
 
-	return ConnectionStats{
+	return Metrics{
 		CommandCounts:   cmdCounts,
 		ErrorCounts:     errCounts,
 		BytesTx:         c.bytesTx,

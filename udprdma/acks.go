@@ -1,7 +1,5 @@
 package udprdma
 
-import "log"
-
 // onAck updates send state from a received ACK and prunes txBuffer.
 // Assumes the lock is acquired
 func (s *Session) onAck(seqNrAck uint16) {
@@ -42,7 +40,7 @@ func (s *Session) onPeerNack(seq uint16) {
 	s.retransmitAttempts = 0
 	sent := s.retransmitFrom(seq)
 	if sent == 0 {
-		log.Printf("[%s]: NACK retransmit from %d sent 0 packets", s.peerAddr, seq)
+		s.logger.Warn("NACK retransmit sent 0 packets", "peer", s.peerAddr, "from", seq)
 	}
 	s.updateAckTimer()
 }

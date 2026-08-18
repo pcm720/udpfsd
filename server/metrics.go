@@ -1,81 +1,68 @@
 package server
 
 import (
-	"fmt"
-	"sort"
-	"strings"
+	"cmp"
+	"net/netip"
+	"slices"
 	"time"
+
+	"github.com/pcm720/udpfsd/udpfs"
+	"github.com/pcm720/udpfsd/udprdma"
 )
 
-// Format bytes to human readable string (B, KB, MB, TB only)
-func formatBytes(bytes int64) string {
-	const unit = 1024.0
-	switch {
-	case bytes < unit:
-		return fmt.Sprintf("%d B", bytes)
-	case bytes < unit*unit:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/unit)
-	case bytes < unit*unit*unit:
-		return fmt.Sprintf("%.2f MB", float64(bytes)/(unit*unit))
-	}
-	return fmt.Sprintf("%.3f GB", float64(bytes)/(unit*unit*unit))
+// PeerMetrics is a point-in-time snapshot of one peer's connection metrics.
+type PeerMetrics struct {
+	Addr     netip.AddrPort
+	LastSeen time.Time
+	UDPFS    udpfs.Metrics
+	UDPRDMA  udprdma.Metrics
 }
 
-// Format throughput rate to human readable string (B/s, KB/s, MB/s only)
-func formatRate(rate float64) string {
-	const unit = 1024.0
-
-	if rate < unit {
-		return fmt.Sprintf("%.0f B/s", rate)
-	} else if rate < unit*unit {
-		return fmt.Sprintf("%.1f KB/s", rate/unit)
-	}
-
-	return fmt.Sprintf("%.2f MB/s", rate/(unit*unit))
+// Metrics is a point-in-time snapshot of the server's uptime and per-peer metrics.
+type Metrics struct {
+	StartTime time.Time
+	Uptime    time.Duration
+	Peers     []PeerMetrics // sorted by peer address, then port
 }
 
-// Print formatted statistics for a single peer
-func (s *Server) printPeerStats(addr string, p *peer) {
-	udpfsMetrics := p.GetMetrics()
-	udprdmaMetrics := p.GetUDPRDMASession().GetMetrics()
+// Stats returns a snapshot of the server's uptime and per-peer metrics.
+func (s *Server) Stats() Metrics {
+	type peerRef struct {
+		conn     *udpfs.Connection
+		lastSeen time.Time
+		addr     netip.AddrPort
+	}
 
-	fmt.Printf("\n=== Peer: %s ===\nLast seen: %s\n", addr, p.lastSeen.Format(time.DateTime))
+	// Copy peer references under the lock, then snapshot each peer outside it:
+	// the per-peer collectors take their own locks and never call back into Server.
+	s.Lock()
+	refs := make([]peerRef, 0, len(s.cMap))
+	for addr, p := range s.cMap {
+		refs = append(refs, peerRef{conn: p.Connection, lastSeen: p.lastSeen, addr: addr})
+	}
+	startTime := s.startTime
+	s.Unlock()
 
-	// Command counts
-	var cmdLines []string
-	for msgType, count := range udpfsMetrics.CommandCounts {
-		if count > 0 {
-			cmdLines = append(cmdLines, fmt.Sprintf("%s: %d", msgType.String(), count))
+	metrics := Metrics{
+		StartTime: startTime,
+		Peers:     make([]PeerMetrics, 0, len(refs)),
+	}
+	if !startTime.IsZero() {
+		metrics.Uptime = time.Since(startTime)
+	}
+	for _, r := range refs {
+		metrics.Peers = append(metrics.Peers, PeerMetrics{
+			Addr:     r.addr,
+			LastSeen: r.lastSeen,
+			UDPFS:    r.conn.Stats(),
+			UDPRDMA:  r.conn.GetUDPRDMASession().Stats(),
+		})
+	}
+	slices.SortFunc(metrics.Peers, func(a, b PeerMetrics) int {
+		if c := a.Addr.Addr().Compare(b.Addr.Addr()); c != 0 {
+			return c
 		}
-	}
-	sort.Strings(cmdLines)
-	fmt.Printf("Commands: %s\n", strings.Join(cmdLines, ", "))
-
-	// Error counts
-	var errCount int64
-	for _, count := range udpfsMetrics.ErrorCounts {
-		errCount += count
-	}
-	if errCount > 0 {
-		fmt.Printf("Errors: %d total\n", errCount)
-		for msgType, count := range udpfsMetrics.ErrorCounts {
-			if count > 0 {
-				fmt.Printf("\t%s: %d\n", msgType.String(), count)
-			}
-		}
-	}
-
-	fmt.Printf(`
-Read:  %s @ %s
-Write: %s @ %s
-Total UDPRDMA packets: RX: %d, TX: %d
-Peer resets: %d, Peer NACKs: %d
-Retransmits: %d, NACKs: %d, Out-of-order packets: %d
-`,
-		formatBytes(udpfsMetrics.BytesTx), formatRate(udpfsMetrics.AvgTxThroughput),
-		formatBytes(udpfsMetrics.BytesRx), formatRate(udpfsMetrics.AvgRxThroughput),
-		udprdmaMetrics.TotalPacketsRx, udprdmaMetrics.TotalPacketsTx,
-		udprdmaMetrics.PeerResetCount, udprdmaMetrics.PeerNACKCount,
-		udprdmaMetrics.Retransmits, udprdmaMetrics.NACKCount, udprdmaMetrics.UnexpectedSeqNrCount,
-	)
+		return cmp.Compare(a.Addr.Port(), b.Addr.Port())
+	})
+	return metrics
 }

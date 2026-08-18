@@ -1,9 +1,6 @@
 package udprdma
 
-import (
-	"log"
-	"math"
-)
+import "math"
 
 // SendData sends a single DATA packet with full payload and FIN
 func (s *Session) SendData(payload []byte) {
@@ -105,24 +102,24 @@ func (s *Session) handleAckTimeout() {
 	from := (s.txSeqNrAcked + 1) & 0xFFF
 	sent := s.retransmitFrom(from)
 	if sent == 0 {
-		log.Printf("[%s]: ACK retransmit from %d sent 0 packets", s.peerAddr, from)
+		s.logger.Warn("ACK retransmit sent 0 packets", "peer", s.peerAddr, "from", from)
 	}
 
 	if s.retransmitAttempts < MaxRetransmits {
 		if waitingFin {
-			log.Printf("[%s]: FIN ACK timeout for packet %d, retransmitting from %d", s.peerAddr, (s.txSeqNr-1)&0xFFF, from)
+			s.logger.Warn("FIN ACK timeout, retransmitting", "peer", s.peerAddr, "packet", (s.txSeqNr-1)&0xFFF, "from", from)
 		} else {
-			log.Printf("[%s]: window ACK timeout, retransmitting from %d", s.peerAddr, from)
+			s.logger.Warn("window ACK timeout, retransmitting", "peer", s.peerAddr, "from", from)
 		}
 		s.armAckTimer()
 		return
 	}
 
 	if waitingFin {
-		log.Printf("[%s]: final FIN ACK timeout for packet %d, retransmitting from %d and giving up", s.peerAddr, (s.txSeqNr-1)&0xFFF, from)
+		s.logger.Warn("final FIN ACK timeout, retransmitting and giving up", "peer", s.peerAddr, "packet", (s.txSeqNr-1)&0xFFF, "from", from)
 		s.finPending = false
 	} else {
-		log.Printf("[%s]: final window ACK timeout, aborting transfer from %d", s.peerAddr, from)
+		s.logger.Warn("final window ACK timeout, aborting transfer", "peer", s.peerAddr, "from", from)
 		s.clearTransfer()
 	}
 	s.stopAckTimer()
