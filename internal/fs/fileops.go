@@ -276,7 +276,11 @@ func (s *Backend) Getstat(path string) (stat udpfs.StatInfo, err error) {
 
 	f := s.getFileByPath(resolved)
 	if f == nil {
-		return stat, os.ErrInvalid
+		st, err := os.Stat(resolved)
+		if err != nil {
+			return stat, os.ErrInvalid
+		}
+		return udpfs.StatInfoFromFile(st), nil
 	}
 	f.Lock()
 	defer f.Unlock()
