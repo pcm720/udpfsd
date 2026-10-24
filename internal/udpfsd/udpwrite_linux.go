@@ -26,6 +26,9 @@ func newUDPBatchWriter(conn *net.UDPConn) func(addr *net.UDPAddr, packets [][]by
 		}
 		n, err := pc.WriteBatch(msgs, 0)
 		if err != nil || n < len(packets) {
+			if n < 0 {
+				n = 0
+			}
 			// Partial/failed batch: finish remaining with portable writes.
 			for _, p := range packets[n:] {
 				_, _ = conn.WriteToUDPAddrPort(p, addr.AddrPort())
